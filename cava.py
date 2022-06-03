@@ -1,8 +1,27 @@
+import os
+import struct
+import subprocess
+import tempfile
 import PySimpleGUI as sg
-import pyaudio
 import numpy as np
 
-""" RealTime PyAudio wave plot & FFT Transform graphical EQ Display"""
+BARS_NUMBER = 10
+OUTPUT_BIT_FORMAT = "16bit"
+RAW_TARGET = "/dev/stdout"
+RATE = 44100
+
+conpat = """
+[general]
+bars = %d
+[output]
+method = raw
+raw_target = %s
+bit_format = %s
+"""
+
+config = conpat % (BARS_NUMBER, RAW_TARGET, OUTPUT_BIT_FORMAT)
+bytetype, bytesize, bytenorm = ("H", 2, 65535) if OUTPUT_BIT_FORMAT == "16bit" else ("B", 1, 255)
+
 
 # VARS CONSTS:
 _VARS = {'window': False,
@@ -29,13 +48,6 @@ _VARS['window'] = sg.Window('Realtime PyAudio EQ Display',
 
 graph = _VARS['window']['graph']
 
-# INIT vars:
-CHUNK = 128  # Samples: 1024,  512, 256, 128
-RATE = 44100  # Equivalent to Human Hearing at 40 kHz
-INTERVAL = 1  # Sampling Interval in Seconds ie Interval to listen
-TIMEOUT = 10  # In ms for the event loop
-GAIN = 0.6
-pAud = pyaudio.PyAudio()
 
 # FUNCTIONS:
 
@@ -71,31 +83,44 @@ def drawAxesLabels():
     graph.DrawText('Freq. Level - Amplitude', (-5, 50),
                    color='#809AB6', angle=90)
 
+def run():
+    with tempfile.NamedTemporaryFile() as config_file:
+        config_file.write(config.encode())
+        config_file.flush()
+        
+        process = subprocess.Popen(["cava", "-p", config_file.name], stdout=subprocess.PIPE)
+        chunk = bytesize * BARS_NUMBER
+        fmt = bytetype * BARS_NUMBER
+        
+        if RAW_TARGET != "/dev/stdout":
+            if not os.path.exists(RAW_TARGET):
+                os.mkfifo(RAW_TARGET)
+            source = open(RAW_TARGET, "rb")
+        else:
+            source = process.stdout
+        
+        while True:
+            data = source.read(chunk)
+            if len(data) < chunk:
+                break
+            # sample = [i for i in struct.unpack(fmt, data)]  # raw values without norming
+            sample = [i / bytenorm for i in struct.unpack(fmt, data)]
+            updateUI(sample)
 
-def drawEQ():
-    fft_data = np.fft.rfft(_VARS['audioData'])
-    fft_data = np.absolute(fft_data)
-    # print(fft_data)
+def fun(x):
+    return x*BARS_NUMBER
 
-    # attenuate first BIN:
-    fft_data[0:8] = fft_data[0:8]/20
-    
-    # Calculate BINS (one way, there are others):
-    # Take consecutive slices of 7 and sum values, resulting in 10 BINS..see:
-    # https://stackoverflow.com/questions/29391815/sum-slices-of-consecutive-values-in-a-numpy-array
-    BINS = [sum(fft_data[current: current+7])
-            for current in range(0, len(fft_data), 7)]
-    # Convert to numpy array:
-    BINS = np.array(BINS)
-    # Normalize and round up to values between 0-10
-    BINS = np.interp(BINS, (BINS.min(), BINS.max()), (0, 10))
-    BINS = np.round(BINS)    
+def drawEQ(data):
+    vfunc = np.vectorize(fun)
+    BINS = vfunc(data)
+    BINS = np.round(BINS)
+    print(BINS)
 
     # Make Bars
-    barStep = 10  # Height, width of bars
+    barStep = BARS_NUMBER  # Height, width of bars
     pad = 2  # padding left,right,top,bottom
     for col, val in enumerate(BINS):
-        print('column:', int(col), ' gets ', int(val), 'Bars')
+        print('column:', col, ' gets ', val, 'Bars')
         for bar in range(0, int(val)):
             # print('bar', bar
             # ( x ➡️ , y ⬆️  ) Coordiante reference
@@ -114,72 +139,25 @@ def drawEQ():
                                  line_color='black',
                                  line_width=2,
                                  fill_color=barColor)  # Conditional
+            # graph.draw_rectangle(top_left=((col*barStep)+pad, barStep*(bar+1)),
+            #                      bottom_right=((col*barStep)+barStep,
+            #                                    (bar*barStep)+pad),
+            #                      line_color='black',
+            #                      line_width=2,
+            #                      fill_color=barColor)  # Conditional
 
-# PYAUDIO STREAM :
-
-
-def stop():
-    if _VARS['stream']:
-        _VARS['stream'].stop_stream()
-        _VARS['stream'].close()
-        _VARS['window']['-PROG-'].update(0)
-        _VARS['window'].FindElement('Stop').Update(disabled=True)
-        _VARS['window'].FindElement('Listen').Update(disabled=False)
-
-
-def callback(in_data, frame_count, time_info, status):
-    _VARS['audioData'] = np.frombuffer(in_data, dtype=np.int16)
-    print(_VARS['audioData'])
-    return (in_data, pyaudio.paContinue)
-
-
-def listen():
-    _VARS['window'].FindElement('Stop').Update(disabled=False)
-    _VARS['window'].FindElement('Listen').Update(disabled=True)
-    _VARS['stream'] = pAud.open(format=pyaudio.paInt16,
-                                channels=1,
-                                rate=RATE,
-                                input=True,
-                                frames_per_buffer=CHUNK
-                                )
-    _VARS['stream'].start_stream()
-
-
-def updateUI():
-    # Update volumne meter
-    _VARS['window']['-PROG-'].update(np.amax(_VARS['audioData']))
-    # Redraw :
+def updateUI(data):
     graph.erase()
     drawAxis()
     drawTicks()
     drawAxesLabels()    
-    drawEQ()
+    drawEQ(data)
 
-
-# INIT:
 drawAxis()
 drawTicks()
 drawAxesLabels()
-listen()
 
-# MAIN LOOP
-while True:
-
-    # event, values = _VARS['window'].read(timeout=TIMEOUT)
-
-    in_data = _VARS['stream'].read(CHUNK)
-    _VARS['audioData'] = np.frombuffer(in_data, dtype=np.int16)
-    updateUI()
-
-    # if event == sg.WIN_CLOSED or event == 'Exit':
-    #     stop()
-    #     pAud.terminate()
-    #     break
-    # if event == 'Listen':
-    #     listen()
-    # if event == 'Stop':
-    #     stop()
-    # elif _VARS['audioData'].size != 0:
-
+if __name__ == "__main__":
+    run()
 
 _VARS['window'].close()
