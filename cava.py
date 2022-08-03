@@ -77,4 +77,8 @@ def initLedStrip():
 
 if __name__ == "__main__":
     strip = initLedStrip()
+    print('Color wipe animations.')
+    colorWipe(strip, Color(255, 0, 0))  # Red wipe
+    colorWipe(strip, Color(0, 255, 0))  # Green wipe
+    colorWipe(strip, Color(0, 0, 255))  # Blue wipe
     # run()
