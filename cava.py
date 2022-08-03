@@ -2,9 +2,10 @@ import os
 import struct
 import subprocess
 import tempfile
+import math
 import numpy as np
 
-BARS_NUMBER = 10
+BARS_NUMBER = 20
 OUTPUT_BIT_FORMAT = "16bit"
 RAW_TARGET = "/dev/stdout"
 RATE = 44100
@@ -42,8 +43,8 @@ def run():
             data = source.read(chunk)
             if len(data) < chunk:
                 break
-            sample = [i / bytenorm for i in struct.unpack(fmt, data)]
-            print(sample)
+            sample = [str(math.floor(i / bytenorm  * 10)) for i in struct.unpack(fmt, data)]
+            print(";".join(sample))
     
 if __name__ == "__main__":
     run()
