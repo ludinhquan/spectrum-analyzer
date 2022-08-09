@@ -8,8 +8,8 @@ import time
 from rpi_ws281x import PixelStrip, Color
 
 # CAVA configuration
-BARS_NUMBER = 12
-BARS_HEIGHT = 10
+BARS_NUMBER = 6
+BARS_HEIGHT = 20
 RAW_TARGET = "/dev/stdout"
 OUTPUT_BIT_FORMAT = "16bit"
 RATE = 44100
@@ -67,17 +67,38 @@ def resetLed():
         strip.setPixelColor(i, color)
 
 def showLed(sample):
+    color = Color(0, 1, 1);
+    colorBottom = Color(0, 3, 1);
+    colorTop = Color(0, 1, 1);
+
     if len(set(sample)) == 1:
+        resetLed();
+        for i, height in enumerate(sample):
+            strip.setPixelColor(i * BARS_HEIGHT, colorBottom)
         return  
 
     resetLed();
-    color = Color(0, 1, 1);
     for i, height in enumerate(sample):
-        for j in range(height):
-            strip.setPixelColor(i * BARS_HEIGHT + j, color)
+        strip.setPixelColor(i * BARS_HEIGHT, colorBottom)
+        sampleMax[i] = sampleMax[i] if sampleMax[i] > height else height
+        for j in range(height - 1):
+            strip.setPixelColor(i * BARS_HEIGHT + j + 1, color)
+
+    global count
+    for i, height in enumerate(sampleMax):
+        if height != 0:
+            strip.setPixelColor(i * BARS_HEIGHT + height, colorTop)
+        if count % FREQUENCY == 0:
+            sampleMax[i] = sampleMax[i] - 1 if sampleMax[i] - 1 >= 0 else 0
+
+    count += 1
     strip.show() 
 
 strip = PixelStrip(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
+sampleMax = [0] * BARS_NUMBER
+FREQUENCY = 4
+count = 0
+
 if __name__ == "__main__":
     strip.begin()
     run();
